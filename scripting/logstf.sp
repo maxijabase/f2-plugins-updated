@@ -111,8 +111,9 @@ TODO:
 #define LOG_BUFFERSIZE 768 // I have seen log lines longer than 512
 #define LOG_BUFFERCNT 100
 
+#pragma newdecls required
 
-public Plugin:myinfo = {
+public Plugin myinfo = {
     name = "Logs.TF Uploader",
     author = "F2, fixed by stephanie",
     description = "Logs.TF log uploader",
@@ -120,31 +121,48 @@ public Plugin:myinfo = {
     url = "http://sourcemod.krus.dk/"
 };
 
-new String:g_sPluginVersion[32];
-new String:g_sDefaultTrigger[8] = ".ss";
-new String:g_sClassNamesLower[][16] = { "undefined", "scout", "sniper", "soldier", "demoman", "medic", "heavyweapons", "pyro", "spy", "engineer" };
+char g_sPluginVersion[32];
+char g_sDefaultTrigger[8] = ".ss";
+char g_sClassNamesLower[][16] = { "undefined", "scout", "sniper", "soldier", "demoman", "medic", "heavyweapons", "pyro", "spy", "engineer" };
 
-new String:g_sLogBuffer[LOG_BUFFERCNT][LOG_BUFFERSIZE];
-new g_iNextLogBuffer = 0, bool:g_bLogReady = false, bool:g_bIsUploading = false;
-new g_iUploadAttempt = 0;
-new g_iPlayersInMatch;
-new Handle:g_hCvarHostname, Handle:g_hCvarRedTeamName, Handle:g_hCvarBlueTeamName, Handle:g_hCvarLogsDir;
-new Handle:g_hCvarApikey, Handle:g_hCvarTitle, Handle:g_hCvarAutoUpload, Handle:g_hCvarMidGameUpload, Handle:g_hCvarMidGameNotice;
-new String:g_sLastLogURL[128];
-new String:g_sCachedHostname[23], String:g_sCachedRedTeamName[6], String:g_sCachedBluTeamName[6], String:g_sCachedMap[24];
-new Handle:g_hLogUploaded; // public LogUploaded(bool:success, const String:logid[], const String:url[])
-new Handle:g_hBlockLogLine; // public Action:BlockLogLine(const String:logline[])
+char g_sLogBuffer[LOG_BUFFERCNT][LOG_BUFFERSIZE];
 
-new bool:g_bIsPartialUpload = false;
-new Handle:g_hTimerUploadPartialLog = INVALID_HANDLE;
-new String:g_sCurrentLogID[32] = "";
-new bool:g_bReuploadASAP = false;
-new bool:g_bPartialUploadNotice[MAXPLAYERS+1]; // true if the player should receive a Partial Upload notice upon death
-new bool:g_bFirstPartialUploaded = false;
+bool g_bLogReady = false;
+bool g_bIsUploading = false;
 
-new bool:g_bDisableSS = false;
+int g_iNextLogBuffer = 0;
+int g_iUploadAttempt = 0;
+int g_iPlayersInMatch;
 
-public OnPluginStart() {
+ConVar g_hCvarHostname;
+ConVar g_hCvarRedTeamName;
+ConVar g_hCvarBlueTeamName;
+ConVar g_hCvarLogsDir;
+ConVar g_hCvarApikey;
+ConVar g_hCvarTitle;
+ConVar g_hCvarAutoUpload;
+ConVar g_hCvarMidGameUpload;
+ConVar g_hCvarMidGameNotice;
+
+char g_sLastLogURL[128];
+char g_sCachedHostname[23];
+char g_sCachedRedTeamName[6];
+char g_sCachedBluTeamName[6];
+char g_sCachedMap[24];
+
+GlobalForward g_hLogUploaded; // public LogUploaded(bool success, const char[] logid, const char[] url)
+GlobalForward g_hBlockLogLine; // public Action BlockLogLine(const char[] logline)
+
+bool g_bIsPartialUpload = false;
+Handle g_hTimerUploadPartialLog = INVALID_HANDLE;
+char g_sCurrentLogID[32] = "";
+bool g_bReuploadASAP = false;
+bool g_bPartialUploadNotice[MAXPLAYERS+1]; // true if the player should receive a Partial Upload notice upon death
+bool g_bFirstPartialUploaded = false;
+
+bool g_bDisableSS = false;
+
+public void OnPluginStart() {
     // Set up auto updater
     if (LibraryExists("updater"))
         Updater_AddPlugin(UPDATE_URL);
@@ -161,7 +179,7 @@ public OnPluginStart() {
     // A player says something
     // Purpose: When an admin says !ul then upload logs and suppress the message
     // Purpose: React when someone says .ss
-    RegConsoleCmd("say", Command_say);
+    RegConsoleCmd("say", Command_Say);
 
     // Remember handles to some cvars
     g_hCvarHostname         = FindConVar("hostname");
@@ -191,7 +209,7 @@ public OnPluginStart() {
     FormatEx(g_sPluginVersion, sizeof(g_sPluginVersion), "LogsTF %s", PLUGIN_VERSION);
 
     // Detect if Sizzling Stats is installed (if so, disable .ss)
-    new Handle:sizz_stats_version = FindConVar("sizz_stats_version");
+    Handle sizz_stats_version = FindConVar("sizz_stats_version");
     if (sizz_stats_version != INVALID_HANDLE) {
         g_bDisableSS = true;
         g_sDefaultTrigger = "!log";
@@ -201,7 +219,7 @@ public OnPluginStart() {
     OnMapStart();
 }
 
-public OnMapStart() {
+public void OnMapStart() {
     Match_OnMapStart();
 }
 
@@ -209,19 +227,19 @@ public void OnMapEnd() {
     Match_OnMapEnd();
 }
 
-public OnLibraryAdded(const String:name[]) {
+public void OnLibraryAdded(const char[] name) {
     // Set up auto updater
     if (StrEqual(name, "updater"))
         Updater_AddPlugin(UPDATE_URL);
 }
 
-public OnPluginEnd() {
+public void OnPluginEnd() {
     // Clean up
     RemoveGameLogHook(GameLog);
-    decl String:path[64];
+    char path[64];
     GetLogPath(LOG_PATH, path, sizeof(path));
     DeleteFile(path);
-    CloseHandle(g_hLogUploaded);
+    delete g_hLogUploaded;
 }
 
 
@@ -229,22 +247,22 @@ public OnPluginEnd() {
 // Match - start / end
 // -----------------------------------
 
-StartMatch() {
+void StartMatch() {
     FlushLog();
     g_sLastLogURL = ""; // Avoid people typing .ss towards the end of the match, only to show the old stats
 
     g_iPlayersInMatch = 0;
-    for (new client = 1; client <= MaxClients; client++) {
+    for (int client = 1; client <= MaxClients; client++) {
         if (!IsRealPlayer(client))
             continue;
-        new TFTeam:team = TFTeam:GetClientTeam(client);
+        TFTeam team = view_as<TFTeam>(GetClientTeam(client));
         if (team == TFTeam_Red || team == TFTeam_Blue)
             g_iPlayersInMatch++;
 
         // Write "changed role to" log lines to the log, such that logs.tf can calculate the "class play-time" correctly.
-        decl String:playerName[64];
-        decl String:playerSteamID[64];
-        decl String:playerTeam[64];
+        char playerName[64];
+        char playerSteamID[64];
+        char playerTeam[64];
         GetClientName(client, playerName, sizeof(playerName));
         GetClientAuthStringNew(client, playerSteamID, sizeof(playerSteamID), false);
         GetPlayerTeamStr(GetClientTeam(client), playerTeam, sizeof(playerTeam));
@@ -252,10 +270,10 @@ StartMatch() {
     }
 
     // Clear the log file and make sure it exists
-    decl String:path[64];
+    char path[64];
     GetLogPath(LOG_PATH, path, sizeof(path));
-    new Handle:file = OpenFile(path, "w");
-    CloseHandle(file);
+    File file = OpenFile(path, "w");
+    delete file;
     g_bLogReady = false;
 
     // Set up Partial Upload
@@ -270,7 +288,7 @@ StartMatch() {
     CacheMatchValues();
 }
 
-ResetMatch() {
+void ResetMatch() {
     if (g_hTimerUploadPartialLog != INVALID_HANDLE) {
         KillTimer(g_hTimerUploadPartialLog);
         g_hTimerUploadPartialLog = INVALID_HANDLE;
@@ -279,7 +297,7 @@ ResetMatch() {
     FlushLog();
 }
 
-EndMatch(bool:endedMidgame) {
+void EndMatch(bool endedMidgame) {
     if (g_hTimerUploadPartialLog != INVALID_HANDLE) {
         KillTimer(g_hTimerUploadPartialLog);
         g_hTimerUploadPartialLog = INVALID_HANDLE;
@@ -292,7 +310,7 @@ EndMatch(bool:endedMidgame) {
     g_bLogReady = true;
     g_iUploadAttempt = 1;
 
-    new autoupload = GetConVarInt(g_hCvarAutoUpload);
+    int autoupload = g_hCvarAutoUpload.IntValue;
     if (autoupload == 1) {
         if (g_iPlayersInMatch >= 4 && GetEngineTime() - g_fMatchStartTime >= 90) {
             UploadLog(false);
@@ -306,18 +324,18 @@ EndMatch(bool:endedMidgame) {
     }
 }
 
-CacheMatchValues() {
-    GetConVarString(g_hCvarHostname, g_sCachedHostname, sizeof(g_sCachedHostname));
-    GetConVarString(g_hCvarBlueTeamName, g_sCachedBluTeamName, sizeof(g_sCachedBluTeamName));
-    GetConVarString(g_hCvarRedTeamName, g_sCachedRedTeamName, sizeof(g_sCachedRedTeamName));
+void CacheMatchValues() {
+    g_hCvarHostname.GetString(g_sCachedHostname, sizeof(g_sCachedHostname));
+    g_hCvarBlueTeamName.GetString(g_sCachedBluTeamName, sizeof(g_sCachedBluTeamName));
+    g_hCvarRedTeamName.GetString(g_sCachedRedTeamName, sizeof(g_sCachedRedTeamName));
     String_Trim(g_sCachedHostname, g_sCachedHostname, sizeof(g_sCachedHostname));
     String_Trim(g_sCachedBluTeamName, g_sCachedBluTeamName, sizeof(g_sCachedBluTeamName));
     String_Trim(g_sCachedRedTeamName, g_sCachedRedTeamName, sizeof(g_sCachedRedTeamName));
     GetCurrentMap(g_sCachedMap, sizeof(g_sCachedMap));
 
     // Remove last word in hostname if it's too long
-    new spacepos = -1;
-    for (new i = strlen(g_sCachedHostname) - 1; i >= 18; i--) {
+    int spacepos = -1;
+    for (int i = strlen(g_sCachedHostname) - 1; i >= 18; i--) {
         if (g_sCachedHostname[i] == ' ') {
             spacepos = i;
             break;
@@ -330,13 +348,13 @@ CacheMatchValues() {
     }
 }
 
-AnnounceLogReady() {
-    for (new client = 1; client <= MaxClients; client++) {
+void AnnounceLogReady() {
+    for (int client = 1; client <= MaxClients; client++) {
         if (!IsRealPlayer2(client))
             continue;
         if (!Client_IsAdmin(client))
             continue;
-        decl String:nickname[32];
+        char nickname[32];
         GetClientName(client, nickname, sizeof(nickname));
         CPrintToChat(client, "%s%s%s", "{lightgreen}[LogsTF] {blue}", nickname, ": To upload logs, type: {yellow}!ul");
     }
@@ -351,20 +369,20 @@ AnnounceLogReady() {
 // Partial Upload (Midgame Logs)
 // -----------------------------------
 
-public Event_RoundEnd(Handle:event, const String:name[], bool:dontBroadcast) {
-    if (GetConVarInt(g_hCvarMidGameUpload) <= 0)
+public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
+    if (g_hCvarMidGameUpload.IntValue <= 0)
         return;
 
     // Don't upload if the map is about to end
-    new timeleft = GetTimeLeft();
+    int timeleft = GetTimeLeft();
     if (timeleft != -1 && timeleft < 15)
         return;
 
     if (!g_bInMatch)
         return;
 
-    new autoupload = GetConVarInt(g_hCvarAutoUpload);
-    new bool:shouldUpload = (autoupload == 1 && g_iPlayersInMatch >= 4 && GetEngineTime() - g_fMatchStartTime >= 90) || (autoupload == 2);
+    int autoupload = g_hCvarAutoUpload.IntValue;
+    bool shouldUpload = (autoupload == 1 && g_iPlayersInMatch >= 4 && GetEngineTime() - g_fMatchStartTime >= 90) || (autoupload == 2);
     if (!shouldUpload)
         return;
 
@@ -372,7 +390,7 @@ public Event_RoundEnd(Handle:event, const String:name[], bool:dontBroadcast) {
     CreateTimer(0.1, Timer_UploadPartialLog, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
-public Action:Timer_UploadPartialLog(Handle:timer) {
+public Action Timer_UploadPartialLog(Handle timer) {
     // Only upload a partial log if the match is still running.
     if (!g_bInMatch)
         return Plugin_Stop;
@@ -386,10 +404,10 @@ public Action:Timer_UploadPartialLog(Handle:timer) {
 }
 
 
-public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
-    if (GetConVarInt(g_hCvarMidGameUpload) <= 0)
+public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
+    if (g_hCvarMidGameUpload.IntValue <= 0)
         return;
-    if (!GetConVarBool(g_hCvarMidGameNotice)) // Is midgame notices disabled?
+    if (!g_hCvarMidGameNotice.BoolValue) // Is midgame notices disabled?
         return;
     if (!g_bInMatch) // Partial Upload is only relevant during the match
         return;
@@ -398,8 +416,8 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) 
     if (!g_bFirstPartialUploaded) // Has there not been a partial upload yet?
         return;
 
-    new userid = GetEventInt(event, "userid");
-    new client = GetClientOfUserId(userid);
+    int userid = event.GetInt("userid");
+    int client = GetClientOfUserId(userid);
 
     if (!g_bPartialUploadNotice[client]) // Does the user need to be notified? If not ...
         return;
@@ -415,12 +433,12 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) 
 // -----------------------------------
 // Handle user input
 // -----------------------------------
-new Float:g_fSSTime[MAXPLAYERS+1];
-public Action:Command_say(client, args) {
+float g_fSSTime[MAXPLAYERS+1];
+public Action Command_Say(int client, int args) {
     if (client == 0)
         return Plugin_Continue;
 
-    decl String:text[256];
+    char text[256];
     GetCmdArgString(text, sizeof(text));
     if (text[0] == '"' && strlen(text) >= 2) {
         strcopy(text, sizeof(text), text[1]);
@@ -430,7 +448,7 @@ public Action:Command_say(client, args) {
 
     if (StrEqual(text, "!ul", false) || StrEqual(text, ".ul", false)) {
         if (Client_IsAdmin(client)) {
-            decl String:nickname[32];
+            char nickname[32];
             GetClientName(client, nickname, sizeof(nickname));
             if (g_bIsUploading && g_bLogReady == false) {
                 CPrintToChat(client, "%s%s%s", "{lightgreen}[LogsTF] {blue}", nickname, ": Log is already being uploaded...");
@@ -472,13 +490,13 @@ public Action:Command_say(client, args) {
     return Plugin_Continue;
 }
 
-public QueryConVar_DisableHtmlMotd(QueryCookie:cookie, client, ConVarQueryResult:result, const String:cvarName[], const String:cvarValue[]) {
+public void QueryConVar_DisableHtmlMotd(QueryCookie cookie, int client, ConVarQueryResult result, const char[] cvarName, const char[] cvarValue) {
     if (!IsClientValid(client))
         return;
 
     if (result == ConVarQuery_Okay) {
         if (StringToInt(cvarValue) != 0) {
-            decl String:nickname[32];
+            char nickname[32];
             GetClientName(client, nickname, sizeof(nickname));
 
             CPrintToChat(client, "%s%s%s", "{lightgreen}[LogsTF] {default}", nickname, ": To see logs in-game, you need to set: {aqua}cl_disablehtmlmotd 0");
@@ -486,7 +504,7 @@ public QueryConVar_DisableHtmlMotd(QueryCookie:cookie, client, ConVarQueryResult
         }
     }
 
-    new Float:waitTime = 0.3;
+    float waitTime = 0.3;
     waitTime -= GetTickedTime() - g_fSSTime[client];
     if (waitTime <= 0.0)
         waitTime = 0.01;
@@ -496,7 +514,7 @@ public QueryConVar_DisableHtmlMotd(QueryCookie:cookie, client, ConVarQueryResult
 }
 
 // Compatibility with ChatColor plugin
-public Action:BlockSay(client, const String:text[], bool:teamSay) {
+public Action BlockSay(int client, const char[] text, bool teamSay) {
     if (teamSay)
         return Plugin_Continue;
     if (StrEqual(text, "!ul", false) && Client_IsAdmin(client))
@@ -504,19 +522,19 @@ public Action:BlockSay(client, const String:text[], bool:teamSay) {
     return Plugin_Continue;
 }
 
-public Action:Timer_ShowStats(Handle:timer, any:client) {
+public Action Timer_ShowStats(Handle timer, any client) {
     if (!IsClientValid(client))
         return;
 
-    decl String:num[3];
-    new Handle:Kv = CreateKeyValues("data");
+    char num[3];
+    KeyValues kv = CreateKeyValues("data");
     IntToString(MOTDPANEL_TYPE_URL, num, sizeof(num));
-    KvSetString(Kv, "title", "Logs");
-    KvSetString(Kv, "type", num);
-    KvSetString(Kv, "msg", g_sLastLogURL);
-    KvSetNum(Kv, "customsvr", 1);
-    ShowVGUIPanel(client, "info", Kv);
-    CloseHandle(Kv);
+    kv.SetString("title", "Logs");
+    kv.SetString("type", num);
+    kv.SetString("msg", g_sLastLogURL);
+    kv.SetNum("customsvr", 1);
+    ShowVGUIPanel(client, "info", kv);
+    delete kv;
 }
 
 // -----------------------------------
@@ -527,13 +545,14 @@ public Action:Timer_ShowStats(Handle:timer, any:client) {
 // Save log lines to file
 // -----------------------------------
 
-public Action:GameLog(const String:message[]) {
-    if (CallBlockLogLine(message) == Plugin_Continue) // I benchmarked this on my computer. In a normal 30min match there can be up to 6,000 log lines. This function can be called 8,500,000,000 times during that time.
+public Action GameLog(const char[] message) {
+    // I benchmarked this on my computer. In a normal 30min match there can be up to 6,000 log lines. This function can be called 8,500,000,000 times during that time.
+    if (CallBlockLogLine(message) == Plugin_Continue) 
         AddLogLine(message);
     return Plugin_Continue;
 }
 
-AddLogLine(const String:message[]) {
+void AddLogLine(const char[] message) {
     if (strlen(message) >= LOG_BUFFERSIZE) {
         LogError("Log line too long (%i): %s", strlen(message), message);
         return;
@@ -541,27 +560,27 @@ AddLogLine(const String:message[]) {
     if (g_iNextLogBuffer >= LOG_BUFFERCNT)
         SetFailState("%s", "Wrong log buffer");
 
-    decl String:time[32];
+    char time[32];
     FormatTime(time, sizeof(time), "%m/%d/%Y - %H:%M:%S");
     FormatEx(g_sLogBuffer[g_iNextLogBuffer++], LOG_BUFFERSIZE, "L %s: %s", time, message);
     if (g_iNextLogBuffer == LOG_BUFFERCNT)
         FlushLog();
 }
 
-FlushLog() {
+void FlushLog() {
     if (g_iNextLogBuffer == 0)
         return;
 
-    new firstLine = 0;
-    new lastLine = g_iNextLogBuffer;
+    int firstLine = 0;
+    int lastLine = g_iNextLogBuffer;
 
     if (g_bInMatch) {
-        decl String:path[64];
+        char path[64];
         GetLogPath(LOG_PATH, path, sizeof(path));
-        new Handle:file = OpenFile(path, "a");
-        for (new line = firstLine; line < lastLine; line++)
+        File file = OpenFile(path, "a");
+        for (int line = firstLine; line < lastLine; line++)
             WriteFileString(file, g_sLogBuffer[line], false);
-        CloseHandle(file);
+        delete file;
     }
 
     g_iNextLogBuffer = 0;
@@ -577,7 +596,7 @@ FlushLog() {
 // Upload log file
 // -----------------------------------
 
-UploadLog(bool:partial) {
+void UploadLog(bool partial) {
     if (!partial && !g_bLogReady) {
         return;
     }
@@ -590,8 +609,8 @@ UploadLog(bool:partial) {
         return;
     }
 
-    decl String:apiKey[64];
-    GetConVarString(g_hCvarApikey, apiKey, sizeof(apiKey));
+    char apiKey[64];
+    g_hCvarApikey.GetString(apiKey, sizeof(apiKey));
     TrimString(apiKey);
     if (strlen(apiKey) == 0) {
         if (!partial)
@@ -606,14 +625,14 @@ UploadLog(bool:partial) {
     g_bIsUploading = true;
     g_bIsPartialUpload = partial;
 
-    decl String:title[128];
-    GetConVarString(g_hCvarTitle, title, sizeof(title));
+    char title[128];
+    g_hCvarTitle.GetString(title, sizeof(title));
     ReplaceString(title, sizeof(title), "{server}", g_sCachedHostname, false);
     ReplaceString(title, sizeof(title), "{blu}", g_sCachedBluTeamName, false);
     ReplaceString(title, sizeof(title), "{blue}", g_sCachedBluTeamName, false);
     ReplaceString(title, sizeof(title), "{red}", g_sCachedRedTeamName, false);
 
-    decl String:path[64], String:partialpath[64];
+    char path[64], partialpath[64];
     GetLogPath(LOG_PATH, path, sizeof(path));
     GetLogPath(PLOG_PATH, partialpath, sizeof(partialpath));
 
@@ -630,14 +649,14 @@ UploadLog(bool:partial) {
         }
 
         // We should NOT add a Round_Stalemate just after a round has ended (logs.tf will not understand it)
-        //decl String:buffer[128];
-        //decl String:time[32];
+        //char buffer[128];
+        //char time[32];
         //FormatTime(time, sizeof(time), "%m/%d/%Y - %H:%M:%S");
         //FormatEx(buffer, sizeof(buffer), "\nL %s: %s\n", time, "World triggered \"Round_Stalemate\"");
 
-        //new Handle:file = OpenFile(partialpath, "a");
+        //Handle file = OpenFile(partialpath, "a");
         //WriteFileString(file, buffer, false);
-        //CloseHandle(file);
+        //delete file;
     }
 
     if (!partial)
@@ -681,7 +700,7 @@ public void UploadLog_Complete(bool success, const char[] contents, int metadata
         } else {
             if (success && g_bFirstPartialUploaded == false) {
                 g_bFirstPartialUploaded = true;
-                for (new i = 1; i <= MaxClients; i++) {
+                for (int i = 1; i <= MaxClients; i++) {
                     if (!IsRealPlayer(i))
                         continue;
 
@@ -691,7 +710,7 @@ public void UploadLog_Complete(bool success, const char[] contents, int metadata
         }
     } else if (!success) {
         if (g_iUploadAttempt < 3) {
-            new waittime = (g_iUploadAttempt - 1) * 10 + 5;
+            int waittime = (g_iUploadAttempt - 1) * 10 + 5;
             if (!g_bIsPartialUpload)
                 CPrintToChatAll("%s%i%s", "{lightgreen}[LogsTF] {red}Retrying upload in ", waittime, " seconds...");
             g_iUploadAttempt++;
@@ -706,13 +725,13 @@ public void UploadLog_Complete(bool success, const char[] contents, int metadata
     }
 }
 
-public bool:ParseLogsResponse(const char[] contents) {
+public bool ParseLogsResponse(const char[] contents) {
     // {"log_id":29897, "url":"/29897", "success":true}
     int size = strlen(contents) + 1;
     char[] resBuff = new char[size];
     strcopy(resBuff, size, contents);
 
-    decl String:url[64], String:success[16] = "";
+    char url[64], success[16] = "";
     if (FindJsonValue(resBuff, "success", success, sizeof(success)) && StrEqual(success, "true", false) && FindJsonValue(resBuff, "url", url, sizeof(url))) {
         if (!FindJsonValue(resBuff, "log_id", g_sCurrentLogID, sizeof(g_sCurrentLogID))) {
             CPrintToChatAll("%s", "{lightgreen}[LogsTF] {blue}log_id not found");
@@ -733,7 +752,7 @@ public bool:ParseLogsResponse(const char[] contents) {
 
         return true;
     } else {
-        decl String:error[128] = "Unknown error.";
+        char error[128] = "Unknown error.";
         if (!FindJsonValue(resBuff, "error", error, sizeof(error))) {
             String_Trim(resBuff, resBuff, size);
             Format(error, sizeof(error), "Unknown error:\n%s", resBuff);
@@ -755,14 +774,14 @@ public bool:ParseLogsResponse(const char[] contents) {
     }
 }
 
-public Action:RetryUploadLog(Handle:timer, any:client) {
+public Action RetryUploadLog(Handle timer, any client) {
     g_bLogReady = true;
     g_bIsUploading = false;
     UploadLog(false);
 }
 
 
-CallLogUploaded(bool:success, const String:logid[], const String:url[]) {
+void CallLogUploaded(bool success, const char[] logid, const char[] url) {
     Call_StartForward(g_hLogUploaded);
 
     // Push parameters one at a time
@@ -774,23 +793,23 @@ CallLogUploaded(bool:success, const String:logid[], const String:url[]) {
     Call_Finish();
 }
 
-Action:CallBlockLogLine(const String:logline[]) {
+Action CallBlockLogLine(const char[] logline) {
     Call_StartForward(g_hBlockLogLine);
 
     // Push parameters one at a time
     Call_PushString(logline);
 
     // Finish the call
-    new Action:result;
+    Action result;
     Call_Finish(result);
 
     return result;
 }
 
 
-GetLogPath(const String:file[], String:destpath[], destpathLen) {
-    decl String:logsdir[64];
-    GetConVarString(g_hCvarLogsDir, logsdir, sizeof(logsdir));
+void GetLogPath(const char[] file, char[] destpath, int destpathLen) {
+    char logsdir[64];
+    g_hCvarLogsDir.GetString(logsdir, sizeof(logsdir));
     if (logsdir[0] == '\0')
         strcopy(destpath, destpathLen, file);
     else
@@ -800,7 +819,7 @@ GetLogPath(const String:file[], String:destpath[], destpathLen) {
 
 
 // this is a very simpLe json "parser", that only works on vEry simple json strinGs (as the Ones sent by logs.tf).
-bool:FindJsonValue(const String:input[], const String:key[], String:value[], maxlen) {
+bool FindJsonValue(const char[] input, const char[] key, char[] value, int maxlen) {
     /*
         matches: 3
         match 0: "url":"/29897",
@@ -814,21 +833,21 @@ bool:FindJsonValue(const String:input[], const String:key[], String:value[], max
         match 3: 29897
     */
 
-    decl String:regex_str[128];
+    char regex_str[128];
     Format(regex_str, sizeof(regex_str), "\"%s\"\\s*:\\s*(\"(.*?)\"|(.+?))\\s*[,}]", key);
-    new Handle:regex = CompileRegex(regex_str, PCRE_CASELESS);
+    Handle regex = CompileRegex(regex_str, PCRE_CASELESS);
     if (regex == INVALID_HANDLE)
         return false;
-    new matches = MatchRegex(regex, input);
+    int matches = MatchRegex(regex, input);
     if (matches < 3) {
-        CloseHandle(regex);
+        delete regex;
         return false;
     }
     if (!GetRegexSubString(regex, matches == 4 ? 3 : 2, value, maxlen)) {
-        CloseHandle(regex);
+        delete regex;
         return false;
     }
-    CloseHandle(regex);
+    delete regex;
 
     return true;
 }
