@@ -25,9 +25,11 @@ Release notes:
 #define PLUGIN_VERSION "1.0.4"
 #define UPDATE_URL      "https://raw.githubusercontent.com/stephanieLGBT/f2-plugins-updated/master/fixstvslot-updatefile.txt"
 
-new stvOn;
+#pragma newdecls required
 
-public Plugin:myinfo = {
+int stvOn;
+
+public Plugin myinfo = {
     name = "Fix STV Slot",
     author = "F2, fixed by stephanie",
     description = "When STV is enabled, changes the map so SourceTV joins properly.",
@@ -35,7 +37,7 @@ public Plugin:myinfo = {
     url = "http://sourcemod.krus.dk/"
 }
 
-public OnPluginStart()
+public void OnPluginStart()
 {
     // Set up auto updater
     if (LibraryExists("updater"))
@@ -43,12 +45,11 @@ public OnPluginStart()
         Updater_AddPlugin(UPDATE_URL);
     }
     HookConVarChange(FindConVar("tv_enable"), OnSTVChanged);
-    CreateTimer(2.0, checkRGL);
+    CreateTimer(2.0, CheckRGL);
 }
 
-public OnLibraryAdded(const String:name[])
+public void OnLibraryAdded(const char[] name)
 {
-
     // Set up auto updater
     if (StrEqual(name, "updater"))
     {
@@ -56,28 +57,24 @@ public OnLibraryAdded(const String:name[])
     }
 }
 
-public Action checkRGL(Handle:timer)
+public Action CheckRGL(Handle timer)
 {
-    new Handle:rgl_cast = FindConVar("rgl_cast");
-    if (rgl_cast == INVALID_HANDLE)
-    {
-        //
-    }
-    else
+    Handle rgl_cast = FindConVar("rgl_cast");
+    if (rgl_cast != INVALID_HANDLE)
     {
         LogMessage("[FixSTVSlot] RGLQoL plugin detected! Unloading to prevent conflicts.");
         ServerCommand("sm plugins unload fixstvslot");
     }
 }
 
-public OnSTVChanged(ConVar convar, char[] oldValue, char[] newValue)
+public void OnSTVChanged(ConVar convar, char[] oldValue, char[] newValue)
 {
-    stvOn = GetConVarBool(FindConVar("tv_enable"));
+    stvOn = FindConVar("tv_enable").BoolValue;
     if (stvOn == 1)
     {
         LogMessage("[FixSTVSlot] tv_enable changed to 1! Changing level in 10 seconds unless manual map change occurs before then.");
         PrintToChatAll("[FixSTVSlot] tv_enable changed to 1! Changing level in 10 seconds unless manual map change occurs before then.");
-        CreateTimer(10.0, changein10, TIMER_DATA_HNDL_CLOSE | TIMER_FLAG_NO_MAPCHANGE);
+        CreateTimer(10.0, ChangeIn10, TIMER_DATA_HNDL_CLOSE | TIMER_FLAG_NO_MAPCHANGE);
     }
     else if (stvOn == 0)
     {
@@ -85,9 +82,9 @@ public OnSTVChanged(ConVar convar, char[] oldValue, char[] newValue)
     }
 }
 
-public Action changein10(Handle:timer)
+public Action ChangeIn10(Handle timer)
 {
-    new String:mapName[128];
+    char mapName[64];
     GetCurrentMap(mapName, sizeof(mapName));
     ForceChangeLevel(mapName, "STV joined! Forcibly changing level.");
 }
